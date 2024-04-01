@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"go.mau.fi/util/random"
 
@@ -64,6 +65,10 @@ type UploadResponse struct {
 //
 // The same applies to the other message types like DocumentMessage, just replace the struct type and Message field name.
 func (cli *Client) Upload(ctx context.Context, plaintext []byte, appInfo MediaType) (resp UploadResponse, err error) {
+	retryDurations := [2]time.Duration{100 * time.Millisecond, 100 * time.Millisecond}
+	maxRetries := 2
+	retries := 0
+
 	resp.FileLength = uint64(len(plaintext))
 	resp.MediaKey = random.Bytes(32)
 
@@ -86,8 +91,14 @@ func (cli *Client) Upload(ctx context.Context, plaintext []byte, appInfo MediaTy
 
 	dataHash := sha256.Sum256(dataToUpload)
 	resp.FileEncSHA256 = dataHash[:]
-
-	err = cli.rawUpload(ctx, dataToUpload, resp.FileEncSHA256, appInfo, false, &resp)
+	for i := 0; i <= maxRetries; i++ {
+		err = cli.rawUpload(ctx, dataToUpload, resp.FileEncSHA256, appInfo, false, &resp)
+		if err == nil || retries >= maxRetries {
+			return
+		}
+		<-time.After(retryDurations[retries])
+		retries += 1
+	}
 	return
 }
 
